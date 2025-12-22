@@ -91,8 +91,8 @@ def load_documents(file_paths: List):
 
 
 if __name__ == "__main__":
-    # docs = load_documents(["./data/raw/doc_pdf.pdf", "./data/raw/doc_pdf_img.pdf", "./data/raw/doc_docx.docx", "./data/raw/doc_ppt.pptx", "./data/raw/scaned_pdf.pdf"])
-    docs = load_documents(["./data/raw/doc_pdf_img.pdf"])
+    docs = load_documents(["./data/raw/doc_pdf.pdf", "./data/raw/doc_pdf_img.pdf", "./data/raw/doc_docx.docx", "./data/raw/doc_ppt.pptx", "./data/raw/scaned_pdf.pdf"])
+    # docs = load_documents(["./data/raw/doc_pdf_img.pdf"])
 
     print(f"Total documents loaded: {len(docs)}\n")
     print(f"✅============={type(docs)}\n")

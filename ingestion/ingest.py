@@ -1,9 +1,21 @@
 # ingest.py
-from embed_func import embed_text, embed_image, embed_table
-from clean import clean_text
+from ingestion.embed_func import embed_text, embed_image, embed_table
+from ingestion.clean import clean_text
 
 from typing import List
 from PIL import Image
+
+import os
+import hashlib
+import psycopg2
+
+from storage.postgres import PostgresStore
+from storage.vector_store import VectorStore
+
+# DB connection
+from config import DB_CONFIG
+conn = psycopg2.connect(**DB_CONFIG)
+cursor = conn.cursor()
 
 TEXT_ELEMENT_TYPES = {
     "Text",
@@ -15,67 +27,72 @@ TEXT_ELEMENT_TYPES = {
     "ListItem"
 }
 
-def ingest_documents(docs: List):
-    records = []
+def prepare_chunks(docs: List):
+    prepared = []
 
     for doc in docs:
         elt_type = doc.metadata.get("element_type")
 
-        # -------- TEXT --------
         if elt_type in TEXT_ELEMENT_TYPES:
-            cleaned_doc = clean_text(doc.page_content)
-            if not cleaned_doc:
+            cleaned = clean_text(doc.page_content)
+            if not cleaned:
                 continue
-            vec = embed_text(cleaned_doc)
-
-        # -------- TABLE --------
         elif elt_type == "Table":
-            vec = embed_table(doc.page_content)
-            if vec is None:
+            cleaned = doc.page_content
+            if not cleaned:
                 continue
-
-        # -------- IMAGE --------
         elif elt_type == "Image":
-            image_path = doc.metadata["image_path"]
-            pil_image = Image.open(image_path).convert("RGB")
-            vec = embed_image(pil_image)
-
+            cleaned = None
         else:
             continue
 
-        records.append({
-            "embedding": vec,
-            "document": doc
+        prepared.append({
+            "element_type": elt_type,
+            "raw_text": doc.page_content,
+            "cleaned_text": cleaned,
+            "page_number": doc.metadata.get("page_number"),
+            "image_path": doc.metadata.get("image_path")
         })
+    return prepared
 
-    return records
 
+def ingest_pipeline(docs, source_path, source_type, raw_file_bytes):
+    pg = PostgresStore(DB_CONFIG)
+    vs = VectorStore(dim=768)
 
-if __name__ == "__main__":
-    from load import load_documents
+    try:
+        # Prepare chunk payloads
+        chunks = prepare_chunks(docs=docs)
 
-    FILES = ["./data/raw/doc_pdf.pdf", "./data/raw/doc_pdf_img.pdf", "./data/raw/doc_docx.docx", "./data/raw/doc_ppt.pptx", "./data/raw/scaned_pdf.pdf"]
+        # Insert document metadata
+        checksum = hashlib.sha256(raw_file_bytes).hexdigest()
+        document_id = pg.insert_document(
+            source_path=source_path,
+            source_type=source_type,
+            checksum=checksum
+        )
+        # Insert chunk metadata before embedding(no embeddings)
+        chunk_ids = pg.insert_chunks(document_id=document_id, chunks=chunks)
 
-    # ---------- STEP 1: LOAD ----------
-    docs = load_documents(FILES)
-    print(f"[LOAD] Total elements loaded: {len(docs)}")
+        # COMMIT TO DATABASE
+        pg.commit()
 
-    # quick sanity: element distribution
-    from collections import Counter
-    element_counts = Counter(d.metadata["element_type"] for d in docs)
-    print("[LOAD] Element types:", dict(element_counts))
+        # Now embeddings are allowed
+        for chunk, chunk_id in zip(chunks, chunk_ids):
+            if chunk["element_type"] in TEXT_ELEMENT_TYPES:
+                vec = embed_text(chunk["cleaned_text"])
+            elif chunk["element_type"] == "Table":
+                vec = embed_table(chunk["cleaned_text"])
+                if vec is None:
+                    continue
+            elif chunk["element_type"] == "Image":
+                img = Image.open(chunk["image_path"]).convert("RGB")
+                vec = embed_image(img)
+            else: continue
 
-    # ---------- STEP 2: INGEST ----------
-    records = ingest_documents(docs)
-    print(f"[INGEST] Total embeddings created: {len(records)}")
-
-    # ---------- STEP 3: VERIFY PAIRS ----------
-    for r in records[:5]:
-        doc = r["document"]
-        emb = r["embedding"]
-
-        print({
-            "element_type": doc.metadata["element_type"],
-            "embedding_dim": emb.shape[0],
-            "text_preview": doc.page_content[:60]
-        })
+            vs.add(vec, metadata = {"chunk_id": str(chunk_id)})
+    except Exception:
+        pg.rollback()
+        raise
+    finally:
+        pg.close()
