@@ -1,4 +1,4 @@
-# vector_store.py
+# # vector_store.py
 import faiss
 import numpy as np
 
@@ -9,17 +9,22 @@ class VectorStore:
         self.id_map = []
 
     def add(self, embedding: np.ndarray, metadata: dict):
-        """metadata MUST contain:
-                - chunk_id(str)"""
         assert "chunk_id" in metadata, "chunk_id is required"
 
-        vec = embedding.astype("float32").reshape(1,-1)
+        vec = embedding.astype("float32")
+        vec = vec / np.linalg.norm(vec)
+        vec = vec.reshape(1, -1)
 
         self.index.add(vec)
         self.id_map.append(metadata["chunk_id"])
-    
+
     def search(self, query_embedding: np.ndarray, top_k: int = 5):
-        vec = query_embedding.astype("float32").reshape(1,-1)
+        if self.index.ntotal == 0:
+            return []
+
+        vec = query_embedding.astype("float32")
+        vec = vec / np.linalg.norm(vec)
+        vec = vec.reshape(1, -1)
 
         scores, indices = self.index.search(vec, top_k)
 
@@ -32,6 +37,6 @@ class VectorStore:
                 "score": float(score)
             })
         return results
-    
+
     def get_all_chunk_ids(self):
         return set(self.id_map)
