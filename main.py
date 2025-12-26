@@ -5,7 +5,9 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from storage.vector_store import VectorStore
 
+vs = VectorStore()
 def run_ingestion(file_paths):
     print("🚀 Starting ingestion pipeline...\n")
 
@@ -37,14 +39,16 @@ def run_ingestion(file_paths):
             docs=docs,
             source_path=source_path,
             source_type=source_type,
-            raw_file_bytes=raw_file_bytes
+            raw_file_bytes=raw_file_bytes,
+            vector_store=vs
         )
 
         print(f"   ✅ Successfully ingested: {file_path}\n")
+    vs.save()
 
     print("🎉 Ingestion pipeline completed for all files.")
 
 if __name__ == "__main__":
-    FILES_TO_INGEST = ["./data/raw/doc_pdf.pdf", "./data/raw/doc_pdf_img.pdf", "./data/raw/doc_docx.docx", "./data/raw/doc_ppt.pptx", "./data/raw/scaned_pdf.pdf"]
+    FILES_TO_INGEST = ["./data/raw/doc_pdf.pdf", "./data/raw/doc_pdf_img.pdf", "./data/raw/doc_docx.docx", "./data/raw/doc_ppt.pptx", "./data/raw/scaned_pdf.pdf", "./data/raw/img.png"]
 
     run_ingestion(FILES_TO_INGEST)

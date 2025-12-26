@@ -1,8 +1,8 @@
-from retrieval.retrieval_signal import dense_retrieve, sparse_retrieve
+from retrieval.retrieval_signal import dense_retrieve_text, sparse_retrieve
 from retrieval.hybrid_fusion import hybrid_fusion
 
 def retrieval_pipeline(query: str, query_embedding, vector_index, bm25_index, top_k: int = 10):
-    dense = dense_retrieve(query_embedding=query_embedding, vector_index=vector_index, top_k=top_k)
+    dense = dense_retrieve_text(query_embedding=query_embedding, vector_index=vector_index, top_k=top_k)
     sparse = sparse_retrieve(query=query, bm25_index=bm25_index, top_k=top_k)
 
     hybrid = hybrid_fusion(dense_results=dense, sparse_results=sparse, top_k=top_k)
@@ -13,42 +13,52 @@ def retrieval_pipeline(query: str, query_embedding, vector_index, bm25_index, to
     }
 
 if __name__ == "__main__":
-    import numpy as np
-
     from storage.vector_store import VectorStore
     from storage.bm25_store import BM25Store
+    from retrieval.chunks_retriever import ChunksRetriever
+    from ingestion.embed_func import embed_text
+    from retrieval.retrieval_pipeline import retrieval_pipeline
+    from config import DB_CONFIG
+    import psycopg2
 
-    # -----------------------------
-    # 1. Mock corpus (chunks)
-    # -----------------------------
-    chunks = {
-        "c1": "Section 17.4.2 describes the reimbursement policy for employees.",
-        "c2": "This document explains leave policy and attendance rules.",
-        "c3": "ISO-9001 compliance requirements are listed here.",
-        "c4": "Reimbursement applies only to travel expenses.",
-        "c5": "Company culture and values are outlined.",
-        "c6": "what are the skill sets?"
-    }
+    # --------------------------------------------------
+    # 1. DB connection (READ-ONLY)
+    # --------------------------------------------------
+    conn = psycopg2.connect(**DB_CONFIG)
+    chunk_store = ChunksRetriever(conn)
 
-    EMBED_DIM = 8
-    np.random.seed(42)
-
-    # -----------------------------
-    # 2. Initialize stores
-    # -----------------------------
-    vector_store = VectorStore(dim=EMBED_DIM)
+    # --------------------------------------------------
+    # 2. Initialize retrieval stores
+    # --------------------------------------------------
+    EMBED_DIM = 768
+    vector_store = VectorStore(text_dim=EMBED_DIM)
     bm25_store = BM25Store()
 
-    # -----------------------------
-    # 3. Index data
-    # -----------------------------
-    for chunk_id, text in chunks.items():
-        # fake embedding (ONLY for testing Step-4)
-        embedding = np.random.rand(EMBED_DIM)
+    # --------------------------------------------------
+    # 3. Load chunks from Postgres
+    # --------------------------------------------------
+    print("Loading chunks from Postgres...")
 
-        vector_store.add(
+    chunks = chunk_store.get_all_chunks()  
+    # expected: List[{"chunk_id": str, "text": str}]
+
+    if not chunks:
+        raise RuntimeError("No chunks found in database.")
+
+    print(f"Loaded {len(chunks)} chunks")
+
+    # --------------------------------------------------
+    # 4. Index chunks (REAL embeddings)
+    # --------------------------------------------------
+    for chunk in chunks:
+        chunk_id = chunk["chunk_id"]
+        text = chunk["text"]
+
+        embedding = embed_text(text)
+
+        vector_store.add_text(
             embedding=embedding,
-            metadata={"chunk_id": chunk_id}
+            chunk_id=chunk_id
         )
 
         bm25_store.add(
@@ -56,19 +66,17 @@ if __name__ == "__main__":
             text=text
         )
 
-    print("Indexed chunks:", vector_store.get_all_chunk_ids())
+    print("Indexing complete")
 
-    # -----------------------------
-    # 4. Query
-    # -----------------------------
-    query = "What does section 17.4.2 say?"
+    # --------------------------------------------------
+    # 5. Query
+    # --------------------------------------------------
+    query = "what are the skills?"
+    query_embedding = embed_text(query)
 
-    # fake query embedding
-    query_embedding = np.random.rand(EMBED_DIM)
-
-    # -----------------------------
-    # 5. Run STEP-4
-    # -----------------------------
+    # --------------------------------------------------
+    # 6. Run STEP-4
+    # --------------------------------------------------
     output = retrieval_pipeline(
         query=query,
         query_embedding=query_embedding,
@@ -77,10 +85,11 @@ if __name__ == "__main__":
         top_k=5
     )
 
-    # -----------------------------
-    # 6. Inspect output
-    # -----------------------------
+    # --------------------------------------------------
+    # 7. Inspect output (SIGNALS ONLY)
+    # --------------------------------------------------
     print("\nSTEP-4 OUTPUT (RETRIEVAL SIGNALS ONLY)")
+
     for r in output["retrieval_results"]:
         print(
             f"chunk_id={r['chunk_id']} | "
@@ -88,3 +97,4 @@ if __name__ == "__main__":
             f"sparse={r['sparse_score']:.4f} | "
             f"fused={r['score']:.4f}"
         )
+

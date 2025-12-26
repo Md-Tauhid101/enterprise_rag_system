@@ -11,8 +11,8 @@ def hybrid_fusion(dense_results: List[Dict], sparse_results: List[Dict], top_k: 
             "dense_score": 0.0,
             "sparse_score": 0.0
         })
-        combined[cid]["dense_score"] += r["dense_score"]
-        combined[cid]["sparse_score"] += r["sparse_score"]
+        combined[cid]["dense_score"] += r.get("dense_score", 0.0)
+        combined[cid]["sparse_score"] += r.get("sparse_score", 0.0)
 
     fused = []
     for v in combined.values():

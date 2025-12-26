@@ -1,8 +1,8 @@
 # graph.py
 from langgraph.graph import StateGraph, END
 from agents.state import QueryState
-from agents.query_understanding.intent_check import intent_check_node
-from agents.query_understanding.rewrite import rewrite_node
+from agents.intent_check import intent_check_node
+from agents.rewrite import rewrite_node
 from utils.refusal import refusal_message
 
 def refuse_node(state: QueryState):
@@ -46,7 +46,7 @@ def build_query_understanding_graph():
 
 
 if __name__ == "__main__":
-    from agents.graph import build_query_understanding_graph
+    from agents.graphs.query_understanding import build_query_understanding_graph
 
     graph = build_query_understanding_graph()
 

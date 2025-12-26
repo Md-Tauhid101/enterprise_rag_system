@@ -13,4 +13,6 @@ data
 
 .env
 
-certs/
+vector_store/
+
+config.py
